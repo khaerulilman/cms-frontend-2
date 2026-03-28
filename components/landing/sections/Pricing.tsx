@@ -1,6 +1,5 @@
 import { pricingPlans } from "../data";
 import { CheckCircleIcon } from "../icons";
-import Link from "next/link";
 
 const PricingCard = ({
   title,
@@ -31,7 +30,7 @@ const PricingCard = ({
         </li>
       ))}
     </ul>
-    <Link href="/projects" passHref>
+    <a href="/projects">
       <button
         className={`w-full py-3 rounded-xl font-medium btn-glow ${
           isPrimary
@@ -42,7 +41,7 @@ const PricingCard = ({
       >
         Get Started
       </button>
-    </Link>
+    </a>
   </div>
 );
 

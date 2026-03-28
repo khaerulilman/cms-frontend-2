@@ -1,4 +1,3 @@
-import Link from "next/link";
 import CountUpNumber from "@/components/CountUpNumber";
 import { ArrowRightIcon } from "../icons";
 import HeroBackground from "../HeroBackground";
@@ -38,13 +37,13 @@ export default function Hero() {
             </p>
             {/* CTA */}
             <div className="flex flex-wrap gap-4 mb-14">
-              <Link
+              <a
                 href="/login"
                 className="group inline-flex items-center gap-2.5 px-7 py-3.5 bg-white text-[#0a0f1a] rounded-full font-semibold text-sm tracking-wide hero-btn-primary"
               >
                 Start Free Now
                 <ArrowRightIcon />
-              </Link>
+              </a>
               {/* <a
                 href="#features"
                 className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-full font-medium text-sm text-slate-300 border border-slate-700/60 hover:border-blue-500/40 transition-all duration-300 bg-white/[0.03] backdrop-blur-sm"
