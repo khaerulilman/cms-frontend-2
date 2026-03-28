@@ -1,19 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const { isAuthenticated, user, logout } = useAuth();
-  const router = useRouter();
 
   const handleLogout = async () => {
     await logout();
-    router.push("/login");
     setIsOpen(false);
+    window.location.href = "/login";
   };
 
   return (
@@ -21,7 +18,7 @@ export default function Navbar() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo/Brand */}
-          <Link href="/" className="flex items-center gap-2">
+          <a href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
               <svg
                 className="w-5 h-5 text-white"
@@ -38,7 +35,7 @@ export default function Navbar() {
               </svg>
             </div>
             <span className="text-xl font-bold gradient-text">Your Dash</span>
-          </Link>
+          </a>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
@@ -62,18 +59,18 @@ export default function Navbar() {
             </a>
             {isAuthenticated && (
               <>
-                <Link
+                <a
                   href="/projects"
                   className="text-slate-300 text-sm font-medium transition-colors"
                 >
                   Projects
-                </Link>
-                <Link
+                </a>
+                <a
                   href="/apikey"
                   className="text-slate-300 text-sm font-medium transition-colors"
                 >
                   API Keys
-                </Link>
+                </a>
                 <div className="flex items-center gap-4 pl-4 border-l border-slate-700">
                   <span className="text-sm text-slate-400">
                     {user?.email || user?.name}
@@ -88,12 +85,12 @@ export default function Navbar() {
               </>
             )}
             {!isAuthenticated && (
-              <Link
+              <a
                 href="/login"
                 className="px-5 py-2 bg-gradient-to-r from-blue-500 to-cyan-400 text-white rounded-lg text-sm font-medium btn-glow shadow-lg shadow-blue-500/25"
               >
                 Get Started
-              </Link>
+              </a>
             )}
           </div>
 
@@ -154,20 +151,20 @@ export default function Navbar() {
               </a>
               {isAuthenticated && (
                 <>
-                  <Link
+                  <a
                     href="/projects"
                     className="block px-4 py-3 rounded-lg text-slate-300 bg-slate-800/30"
                     onClick={() => setIsOpen(false)}
                   >
                     Projects
-                  </Link>
-                  <Link
+                  </a>
+                  <a
                     href="/apikey"
                     className="block px-4 py-3 rounded-lg text-slate-300 bg-slate-800/30"
                     onClick={() => setIsOpen(false)}
                   >
                     API Keys
-                  </Link>
+                  </a>
                   <div className="px-4 py-2 text-sm text-slate-400">
                     {user?.email || user?.name}
                   </div>
@@ -180,13 +177,13 @@ export default function Navbar() {
                 </>
               )}
               {!isAuthenticated && (
-                <Link
+                <a
                   href="/login"
                   className="block px-4 py-3 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-400 text-white text-center font-medium mt-2 btn-glow shadow-lg shadow-blue-500/25"
                   onClick={() => setIsOpen(false)}
                 >
                   Get Started
-                </Link>
+                </a>
               )}
             </div>
           </div>

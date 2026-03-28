@@ -1,12 +1,11 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { BACKEND_URL, api } from "@/lib/api";
 
 function LoginContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { isAuthenticated, isLoading, login } = useAuth();
   const [error, setError] = useState("");
@@ -22,7 +21,7 @@ function LoginContent() {
       setIsProcessingOAuth(true);
 
       // Immediately clear URL params to prevent double execution
-      router.replace("/login", { scroll: false });
+      window.history.replaceState({}, "", "/login");
 
       const handleOAuthCallback = async () => {
         try {
@@ -38,8 +37,8 @@ function LoginContent() {
           // Store user data in state
           login(userData);
 
-          // Redirect to projects
-          router.replace("/projects");
+          // Redirect to projects (full page reload)
+          window.location.href = "/projects";
         } catch (err) {
           console.error("Authentication error:", err);
           setError("Failed to complete authentication. Please try again.");
@@ -49,7 +48,7 @@ function LoginContent() {
 
       handleOAuthCallback();
     }
-  }, [searchParams, login, router, isProcessingOAuth]);
+  }, [searchParams, login, isProcessingOAuth]);
 
   // Redirect if already authenticated (but not during OAuth processing)
   useEffect(() => {
@@ -57,10 +56,10 @@ function LoginContent() {
       const hasOAuthParams =
         searchParams.get("user") || searchParams.get("oauth");
       if (!hasOAuthParams) {
-        router.replace("/projects");
+        window.location.href = "/projects";
       }
     }
-  }, [isAuthenticated, isLoading, router, isProcessingOAuth, searchParams]);
+  }, [isAuthenticated, isLoading, isProcessingOAuth, searchParams]);
 
   const handleGoogleLogin = () => {
     // Redirect to backend Google OAuth endpoint
