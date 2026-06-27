@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 import { useTableDetail } from "../hooks/useTableDetail";
 import {
   addRowToTableDetail,
+  hasRowInTableDetail,
+  removeRowsFromTableDetail,
   rollbackTableDetail,
 } from "../services/tableDetailStore";
 import { useEffect, useState, useRef } from "react";
@@ -77,7 +79,9 @@ export function TableDetail({
     // Check if value is a URL (starts with http/https)
     if (
       displayUrl &&
-      (displayUrl.startsWith("http://") || displayUrl.startsWith("https://"))
+      (displayUrl.startsWith("http://") ||
+        displayUrl.startsWith("https://") ||
+        displayUrl.startsWith("data:image/"))
     ) {
       // Check if it's an image URL
       if (
@@ -129,24 +133,29 @@ export function TableDetail({
 
       const previousState = addRowToTableDetail(selectedTable, tempRow);
 
-      try {
-        const response = await api.createRow(selectedTable);
-        if (response?.data) {
-          // Remove temp row and add actual row from server
+      void (async () => {
+        try {
+          const response = await api.createRow(selectedTable);
+          if (
+            response?.data &&
+            hasRowInTableDetail(selectedTable, tempRow.id)
+          ) {
+            removeRowsFromTableDetail(selectedTable, [tempRow.id]);
+            addRowToTableDetail(selectedTable, response.data);
+          } else if (response?.data) {
+            // Row was removed locally before create finished, keep backend in sync.
+            await api.deleteRow(response.data.id);
+          }
+        } catch (apiErr: any) {
           if (previousState) {
             rollbackTableDetail(selectedTable, previousState);
-            addRowToTableDetail(selectedTable, response.data);
-          } else {
-            addRowToTableDetail(selectedTable, response.data);
+          }
+          console.error("Failed to create row:", apiErr);
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to create row");
           }
         }
-      } catch (apiErr) {
-        // Rollback on API error
-        if (previousState) {
-          rollbackTableDetail(selectedTable, previousState);
-        }
-        console.error("Failed to create row:", apiErr);
-      }
+      })();
     } catch (e) {
       console.error("Error in handleCreateRow:", e);
     }

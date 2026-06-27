@@ -5,6 +5,7 @@ import { useState } from "react";
 import * as React from "react";
 import {
   addColumnsToTableDetail,
+  hasColumnInTableDetail,
   invalidateTableDetail,
   invalidateAllTableCache,
   removeColumnFromTableDetail,
@@ -14,6 +15,11 @@ import {
   rollbackTableDetail,
 } from "@/features/table/services/tableDetailStore";
 import { Cell } from "@/features/table/types";
+
+type PendingOptimisticColumn = {
+  desiredName: string;
+  deleted: boolean;
+};
 
 export function CardFlow({
   isOpen,
@@ -68,6 +74,14 @@ export function CardFlow({
     string | null
   >(null);
   const [initialIsSubTable, setInitialIsSubTable] = useState(false);
+  const pendingOptimisticColumnsRef = React.useRef<
+    Record<string, PendingOptimisticColumn>
+  >({});
+
+  const isOptimisticId = (id?: string | null) => {
+    if (!id) return false;
+    return id.startsWith("temp_") || id.startsWith("temp_col_");
+  };
 
   // Update tableName when editTable mode is opened
   React.useEffect(() => {
@@ -216,7 +230,9 @@ export function CardFlow({
   }
 
   const isImageUrl = (value: string): boolean => {
-    if (!value || !value.startsWith("http")) return false;
+    if (!value) return false;
+    if (value.startsWith("data:image/")) return true;
+    if (!value.startsWith("http")) return false;
     return (
       value.includes(".jpg") ||
       value.includes(".jpeg") ||
@@ -267,16 +283,70 @@ export function CardFlow({
     try {
       setLoading(true);
       setError(null);
-
-      const response = await api.createColumn(selectedTable, [
-        { name: columnName },
+      const tempColumn = {
+        id: `temp_col_${Date.now()}`,
+        tableId: selectedTable,
+        name: columnName,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      pendingOptimisticColumnsRef.current[tempColumn.id] = {
+        desiredName: columnName,
+        deleted: false,
+      };
+      const previousState = addColumnsToTableDetail(selectedTable, [
+        tempColumn,
       ]);
-
-      // Optimistically update state
-      addColumnsToTableDetail(selectedTable, response?.data || []);
 
       setColumnName("");
       onClose();
+      setLoading(false);
+
+      void (async () => {
+        try {
+          const response = await api.createColumn(selectedTable, [
+            {
+              name:
+                pendingOptimisticColumnsRef.current[tempColumn.id]
+                  ?.desiredName || tempColumn.name,
+            },
+          ]);
+          removeColumnFromTableDetail(selectedTable, tempColumn.id);
+          if (response?.data?.length) {
+            const createdColumn = response.data[0];
+            const pending = pendingOptimisticColumnsRef.current[tempColumn.id];
+
+            if (pending?.deleted) {
+              await api.deleteColumn(createdColumn.id);
+              delete pendingOptimisticColumnsRef.current[tempColumn.id];
+              return;
+            }
+
+            addColumnsToTableDetail(selectedTable, response.data);
+
+            if (pending && pending.desiredName !== createdColumn.name) {
+              const updateResponse = await api.updateColumns(
+                createdColumn.id,
+                pending.desiredName,
+              );
+              if (updateResponse?.data) {
+                updateColumnInTableDetail(selectedTable, updateResponse.data);
+              }
+            }
+
+            delete pendingOptimisticColumnsRef.current[tempColumn.id];
+          }
+        } catch (apiErr: any) {
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          delete pendingOptimisticColumnsRef.current[tempColumn.id];
+          setError(apiErr?.message || "Failed to create column");
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to create column");
+          }
+        }
+      })();
     } catch (err: any) {
       setError(err.message || "Failed to create column");
     } finally {
@@ -381,17 +451,24 @@ export function CardFlow({
         selectedRow,
       ]);
 
-      try {
-        await api.deleteRow(selectedRow);
-        onClose();
-        onRowDeleted?.();
-      } catch (apiErr) {
-        // Rollback on API error
-        if (previousState) {
-          rollbackTableDetail(selectedTable, previousState);
+      onClose();
+      onRowDeleted?.();
+      setLoading(false);
+
+      void (async () => {
+        try {
+          if (isOptimisticId(selectedRow)) return;
+          await api.deleteRow(selectedRow);
+        } catch (apiErr: any) {
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          setError(apiErr?.message || "Failed to delete row");
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to delete row");
+          }
         }
-        throw apiErr;
-      }
+      })();
     } catch (err: any) {
       setError(err.message || "Failed to delete row");
     } finally {
@@ -415,17 +492,27 @@ export function CardFlow({
         selectedRows,
       );
 
-      try {
-        await api.bulkDeleteRows(selectedRows);
-        onClose();
-        onRowDeleted?.();
-      } catch (apiErr) {
-        // Rollback on API error
-        if (previousState) {
-          rollbackTableDetail(selectedTable, previousState);
+      onClose();
+      onRowDeleted?.();
+      setLoading(false);
+
+      void (async () => {
+        try {
+          const persistedRowIds = selectedRows.filter(
+            (id: string) => !isOptimisticId(id),
+          );
+          if (persistedRowIds.length === 0) return;
+          await api.bulkDeleteRows(persistedRowIds);
+        } catch (apiErr: any) {
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          setError(apiErr?.message || "Failed to delete rows");
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to delete rows");
+          }
         }
-        throw apiErr;
-      }
+      })();
     } catch (err: any) {
       setError(err.message || "Failed to delete rows");
     } finally {
@@ -449,16 +536,38 @@ export function CardFlow({
         selectedColumn,
       );
 
-      try {
-        await api.deleteColumn(selectedColumn);
-        onClose();
-      } catch (apiErr) {
-        // Rollback on API error
-        if (previousState) {
-          rollbackTableDetail(selectedTable, previousState);
-        }
-        throw apiErr;
+      if (isOptimisticId(selectedColumn)) {
+        pendingOptimisticColumnsRef.current[selectedColumn] = {
+          desiredName:
+            pendingOptimisticColumnsRef.current[selectedColumn]?.desiredName ||
+            selectedColumnData?.name ||
+            "",
+          deleted: true,
+        };
       }
+
+      onClose();
+      setLoading(false);
+
+      void (async () => {
+        try {
+          if (
+            isOptimisticId(selectedColumn) &&
+            !hasColumnInTableDetail(selectedTable, selectedColumn)
+          ) {
+            return;
+          }
+          await api.deleteColumn(selectedColumn);
+        } catch (apiErr: any) {
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          setError(apiErr?.message || "Failed to delete column");
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to delete column");
+          }
+        }
+      })();
     } catch (err: any) {
       setError(err.message || "Failed to delete column");
     } finally {
@@ -489,6 +598,18 @@ export function CardFlow({
         selectedTable,
         updatedColumn,
       );
+
+      if (isOptimisticId(selectedColumnData.id)) {
+        pendingOptimisticColumnsRef.current[selectedColumnData.id] = {
+          desiredName: columnName,
+          deleted:
+            pendingOptimisticColumnsRef.current[selectedColumnData.id]
+              ?.deleted || false,
+        };
+        setColumnName("");
+        onClose();
+        return;
+      }
 
       try {
         const response = await api.updateColumns(
@@ -634,74 +755,42 @@ export function CardFlow({
       return;
     }
 
+    if (
+      isOptimisticId(selectedCell.rowId) ||
+      isOptimisticId(selectedCell.columnId)
+    ) {
+      setError("Please wait, row/column is still syncing.");
+      if (typeof window !== "undefined") {
+        window.alert("Please wait, row/column is still syncing.");
+      }
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      // Kondisi 1: If there's a file selected, upload it (multipart form data)
-      if (selectedFile) {
-        const response = await api.updateCellWithImage(
-          selectedCell.rowId,
-          selectedCell.columnId,
-          selectedFile,
-        );
-        if (response?.data) {
-          // Optimistically update state
-          upsertCellInTableDetail(selectedTable, response.data);
-        }
+      let finalValue = cellValue;
+      if (useSubTableMode) {
+        finalValue = selectedSubTableId || "";
       }
-      // Kondisi 2: If there's an uploadedImageUrl (from database), preserve it by sending imageUrl
-      else if (uploadedImageUrl && !useSubTableMode) {
-        const response = await api.updateCellImage(
-          selectedCell.rowId,
-          selectedCell.columnId,
-          uploadedImageUrl,
-        );
-        if (response?.data) {
-          // Optimistically update state
-          upsertCellInTableDetail(selectedTable, response.data);
-        }
-      }
-      // Kondisi 3: No file and no image, use regular JSON update with text value
-      else {
-        let finalValue = cellValue;
 
-        // Handle sub-table mode
-        if (useSubTableMode) {
-          finalValue = selectedSubTableId || "";
-        }
+      const optimisticCell: Cell = {
+        ...selectedCell,
+        value: selectedFile || uploadedImageUrl ? "" : finalValue || "",
+        imageUrl: selectedFile
+          ? localPreviewUrl || selectedCell.imageUrl || null
+          : uploadedImageUrl && !useSubTableMode
+            ? uploadedImageUrl
+            : useSubTableMode
+              ? null
+              : selectedCell.imageUrl || null,
+      };
 
-        // Create optimistic cell update
-        const optimisticCell: Cell = {
-          ...selectedCell,
-          value: finalValue || "",
-        };
-
-        // Optimistically update state
-        const previousState = upsertCellInTableDetail(
-          selectedTable,
-          optimisticCell,
-        );
-
-        try {
-          const response = await api.updateCell(
-            selectedCell.rowId,
-            selectedCell.columnId,
-            finalValue || "",
-          );
-
-          // Update with server response if available
-          if (response?.data) {
-            upsertCellInTableDetail(selectedTable, response.data);
-          }
-        } catch (apiErr) {
-          // Rollback on API error
-          if (previousState) {
-            rollbackTableDetail(selectedTable, previousState);
-          }
-          throw apiErr;
-        }
-      }
+      const previousState = upsertCellInTableDetail(
+        selectedTable,
+        optimisticCell,
+      );
 
       setUseSubTableMode(false);
       setSelectedSubTableId(null);
@@ -709,6 +798,55 @@ export function CardFlow({
       setLocalPreviewUrl("");
       setCellValue("");
       onClose();
+      setLoading(false);
+
+      void (async () => {
+        try {
+          // Kondisi 1: If there's a file selected, upload it (multipart form data)
+          if (selectedFile) {
+            const response = await api.updateCellWithImage(
+              selectedCell.rowId,
+              selectedCell.columnId,
+              selectedFile,
+            );
+            if (response?.data) {
+              upsertCellInTableDetail(selectedTable, response.data);
+            }
+            return;
+          }
+
+          // Kondisi 2: If there's an uploadedImageUrl (from database), preserve it by sending imageUrl
+          if (uploadedImageUrl && !useSubTableMode) {
+            const response = await api.updateCellImage(
+              selectedCell.rowId,
+              selectedCell.columnId,
+              uploadedImageUrl,
+            );
+            if (response?.data) {
+              upsertCellInTableDetail(selectedTable, response.data);
+            }
+            return;
+          }
+
+          // Kondisi 3: No file and no image, use regular JSON update with text value
+          const response = await api.updateCell(
+            selectedCell.rowId,
+            selectedCell.columnId,
+            finalValue || "",
+          );
+          if (response?.data) {
+            upsertCellInTableDetail(selectedTable, response.data);
+          }
+        } catch (apiErr: any) {
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          setError(apiErr?.message || "Failed to update cell");
+          if (typeof window !== "undefined") {
+            window.alert(apiErr?.message || "Failed to update cell");
+          }
+        }
+      })();
     } catch (err: any) {
       setError(err.message || "Failed to update cell");
     } finally {
