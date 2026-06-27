@@ -2,7 +2,10 @@
 
 import { api } from "@/lib/api";
 import { useTableDetail } from "../hooks/useTableDetail";
-import { invalidateTableDetail } from "../services/tableDetailStore";
+import {
+  addRowToTableDetail,
+  rollbackTableDetail,
+} from "../services/tableDetailStore";
 import { useEffect, useState, useRef } from "react";
 import { TableNameDisplay } from "./TableNameDisplay";
 
@@ -14,7 +17,6 @@ export function TableDetail({
   onEditColumn,
   onUpdateCell,
   refreshTrigger,
-  onRefresh,
   onOpenGuide,
   projectId,
   onEditTable,
@@ -38,6 +40,11 @@ export function TableDetail({
   useEffect(() => {
     setSelectedRowIds(new Set());
   }, [selectedTable, refreshTrigger]);
+
+  const visibleRowIds = new Set(rows.map((row: any) => row.id));
+  const visibleSelectedRowIds = new Set(
+    Array.from(selectedRowIds).filter((rowId) => visibleRowIds.has(rowId)),
+  );
 
   // Fetch sub-tables and create mapping
   useEffect(() => {
@@ -112,11 +119,36 @@ export function TableDetail({
     if (!selectedTable) return;
 
     try {
-      await api.createRow(selectedTable);
-      invalidateTableDetail(selectedTable);
-      onRefresh?.();
+      // Optimistically add row with temporary data
+      const tempRow = {
+        id: `temp_${Date.now()}`,
+        tableId: selectedTable,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      const previousState = addRowToTableDetail(selectedTable, tempRow);
+
+      try {
+        const response = await api.createRow(selectedTable);
+        if (response?.data) {
+          // Remove temp row and add actual row from server
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+            addRowToTableDetail(selectedTable, response.data);
+          } else {
+            addRowToTableDetail(selectedTable, response.data);
+          }
+        }
+      } catch (apiErr) {
+        // Rollback on API error
+        if (previousState) {
+          rollbackTableDetail(selectedTable, previousState);
+        }
+        console.error("Failed to create row:", apiErr);
+      }
     } catch (e) {
-      console.error(e);
+      console.error("Error in handleCreateRow:", e);
     }
   };
 
@@ -137,7 +169,7 @@ export function TableDetail({
   };
 
   const handleToggleAllRows = () => {
-    if (selectedRowIds.size === rows.length) {
+    if (visibleSelectedRowIds.size === rows.length) {
       setSelectedRowIds(new Set());
     } else {
       setSelectedRowIds(new Set(rows.map((r: any) => r.id)));
@@ -145,8 +177,8 @@ export function TableDetail({
   };
 
   const handleBulkDelete = () => {
-    if (selectedRowIds.size === 0) return;
-    onBulkDeleteRows?.(Array.from(selectedRowIds));
+    if (visibleSelectedRowIds.size === 0) return;
+    onBulkDeleteRows?.(Array.from(visibleSelectedRowIds));
   };
 
   const handleOpenSidebarGuide = async () => {
@@ -358,7 +390,8 @@ export function TableDetail({
                       <input
                         type="checkbox"
                         checked={
-                          rows.length > 0 && selectedRowIds.size === rows.length
+                          rows.length > 0 &&
+                          visibleSelectedRowIds.size === rows.length
                         }
                         onChange={handleToggleAllRows}
                         className="w-4 h-4 cursor-pointer accent-blue-500"
@@ -510,7 +543,7 @@ export function TableDetail({
             >
               + Add Row
             </button>
-            {selectedRowIds.size > 0 && (
+            {visibleSelectedRowIds.size > 0 && (
               <button
                 className="px-3 lg:px-4 py-2 rounded-xl border border-dashed
           border-red-700/50 text-red-400
@@ -518,7 +551,7 @@ export function TableDetail({
           transition-all text-sm lg:text-base whitespace-nowrap"
                 onClick={handleBulkDelete}
               >
-                Delete ({selectedRowIds.size})
+                Delete ({visibleSelectedRowIds.size})
               </button>
             )}
           </div>

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { getTableDetail } from "../services/tableDetailStore";
+import {
+  getTableDetail,
+  subscribeTableDetail,
+} from "../services/tableDetailStore";
 import { TableDetailCache } from "../types";
 
 export function useTableDetail(tableId: string | null, refreshTrigger: number) {
@@ -20,7 +23,18 @@ export function useTableDetail(tableId: string | null, refreshTrigger: number) {
         setLoading(true);
         setError(null);
         const result = await getTableDetail(tableId);
-        if (!cancelled) setData(result);
+        if (!cancelled) {
+          setData(result);
+
+          // Subscribe to cache changes
+          const unsubscribe = subscribeTableDetail(tableId, (updatedData) => {
+            if (!cancelled) {
+              setData(updatedData);
+            }
+          });
+
+          return unsubscribe;
+        }
       } catch (e: any) {
         if (!cancelled) setError(e.message);
       } finally {
@@ -28,10 +42,17 @@ export function useTableDetail(tableId: string | null, refreshTrigger: number) {
       }
     };
 
-    load();
+    let unsubscribe: (() => void) | void;
+
+    load().then((unsub) => {
+      unsubscribe = unsub;
+    });
 
     return () => {
       cancelled = true;
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
   }, [tableId, refreshTrigger]);
 

@@ -4,9 +4,16 @@ import { api } from "@/lib/api";
 import { useState } from "react";
 import * as React from "react";
 import {
+  addColumnsToTableDetail,
   invalidateTableDetail,
   invalidateAllTableCache,
+  removeColumnFromTableDetail,
+  removeRowsFromTableDetail,
+  updateColumnInTableDetail,
+  upsertCellInTableDetail,
+  rollbackTableDetail,
 } from "@/features/table/services/tableDetailStore";
+import { Cell } from "@/features/table/types";
 
 export function CardFlow({
   isOpen,
@@ -18,7 +25,6 @@ export function CardFlow({
   selectedCell,
   projectId,
   onClose,
-  onRefresh,
   onTableAdded,
   onTableDeleted,
   onRowDeleted,
@@ -262,13 +268,15 @@ export function CardFlow({
       setLoading(true);
       setError(null);
 
-      await api.createColumn(selectedTable, [{ name: columnName }]);
+      const response = await api.createColumn(selectedTable, [
+        { name: columnName },
+      ]);
 
-      invalidateTableDetail(selectedTable);
+      // Optimistically update state
+      addColumnsToTableDetail(selectedTable, response?.data || []);
 
       setColumnName("");
       onClose();
-      onRefresh();
     } catch (err: any) {
       setError(err.message || "Failed to create column");
     } finally {
@@ -333,7 +341,6 @@ export function CardFlow({
       setIsSubTable(false);
       onClose();
       onTableUpdated?.();
-      onRefresh();
     } catch (err: any) {
       setError(err.message || "Failed to update table");
     } finally {
@@ -368,13 +375,23 @@ export function CardFlow({
     try {
       setLoading(true);
       setError(null);
-      await api.deleteRow(selectedRow);
 
-      invalidateTableDetail(selectedTable);
-      invalidateAllTableCache();
-      onClose();
-      onRefresh();
-      onRowDeleted?.();
+      // Optimistically remove from state
+      const previousState = removeRowsFromTableDetail(selectedTable, [
+        selectedRow,
+      ]);
+
+      try {
+        await api.deleteRow(selectedRow);
+        onClose();
+        onRowDeleted?.();
+      } catch (apiErr) {
+        // Rollback on API error
+        if (previousState) {
+          rollbackTableDetail(selectedTable, previousState);
+        }
+        throw apiErr;
+      }
     } catch (err: any) {
       setError(err.message || "Failed to delete row");
     } finally {
@@ -391,13 +408,24 @@ export function CardFlow({
     try {
       setLoading(true);
       setError(null);
-      await api.bulkDeleteRows(selectedRows);
 
-      invalidateTableDetail(selectedTable);
-      invalidateAllTableCache();
-      onClose();
-      onRefresh();
-      onRowDeleted?.();
+      // Optimistically remove from state
+      const previousState = removeRowsFromTableDetail(
+        selectedTable,
+        selectedRows,
+      );
+
+      try {
+        await api.bulkDeleteRows(selectedRows);
+        onClose();
+        onRowDeleted?.();
+      } catch (apiErr) {
+        // Rollback on API error
+        if (previousState) {
+          rollbackTableDetail(selectedTable, previousState);
+        }
+        throw apiErr;
+      }
     } catch (err: any) {
       setError(err.message || "Failed to delete rows");
     } finally {
@@ -414,12 +442,23 @@ export function CardFlow({
     try {
       setLoading(true);
       setError(null);
-      await api.deleteColumn(selectedColumn);
 
-      invalidateTableDetail(selectedTable);
-      invalidateAllTableCache();
-      onClose();
-      onRefresh();
+      // Optimistically remove from state
+      const previousState = removeColumnFromTableDetail(
+        selectedTable,
+        selectedColumn,
+      );
+
+      try {
+        await api.deleteColumn(selectedColumn);
+        onClose();
+      } catch (apiErr) {
+        // Rollback on API error
+        if (previousState) {
+          rollbackTableDetail(selectedTable, previousState);
+        }
+        throw apiErr;
+      }
     } catch (err: any) {
       setError(err.message || "Failed to delete column");
     } finally {
@@ -441,13 +480,36 @@ export function CardFlow({
     try {
       setLoading(true);
       setError(null);
-      await api.updateColumns(selectedColumnData.id, columnName);
 
-      invalidateTableDetail(selectedTable);
-      invalidateAllTableCache();
-      setColumnName("");
-      onClose();
-      onRefresh();
+      // Create updated column object
+      const updatedColumn = { ...selectedColumnData, name: columnName };
+
+      // Optimistically update state
+      const previousState = updateColumnInTableDetail(
+        selectedTable,
+        updatedColumn,
+      );
+
+      try {
+        const response = await api.updateColumns(
+          selectedColumnData.id,
+          columnName,
+        );
+
+        // Update with server response if different
+        if (response?.data) {
+          updateColumnInTableDetail(selectedTable, response.data);
+        }
+
+        setColumnName("");
+        onClose();
+      } catch (apiErr) {
+        // Rollback on API error
+        if (previousState) {
+          rollbackTableDetail(selectedTable, previousState);
+        }
+        throw apiErr;
+      }
     } catch (err: any) {
       setError(err.message || "Failed to update column");
     } finally {
@@ -583,15 +645,22 @@ export function CardFlow({
           selectedCell.columnId,
           selectedFile,
         );
-        // Backend returns the Cloudinary URL - response handled automatically
+        if (response?.data) {
+          // Optimistically update state
+          upsertCellInTableDetail(selectedTable, response.data);
+        }
       }
       // Kondisi 2: If there's an uploadedImageUrl (from database), preserve it by sending imageUrl
       else if (uploadedImageUrl && !useSubTableMode) {
-        await api.updateCellImage(
+        const response = await api.updateCellImage(
           selectedCell.rowId,
           selectedCell.columnId,
           uploadedImageUrl,
         );
+        if (response?.data) {
+          // Optimistically update state
+          upsertCellInTableDetail(selectedTable, response.data);
+        }
       }
       // Kondisi 3: No file and no image, use regular JSON update with text value
       else {
@@ -602,23 +671,44 @@ export function CardFlow({
           finalValue = selectedSubTableId || "";
         }
 
-        // Update cell value
-        await api.updateCell(
-          selectedCell.rowId,
-          selectedCell.columnId,
-          finalValue || "",
+        // Create optimistic cell update
+        const optimisticCell: Cell = {
+          ...selectedCell,
+          value: finalValue || "",
+        };
+
+        // Optimistically update state
+        const previousState = upsertCellInTableDetail(
+          selectedTable,
+          optimisticCell,
         );
+
+        try {
+          const response = await api.updateCell(
+            selectedCell.rowId,
+            selectedCell.columnId,
+            finalValue || "",
+          );
+
+          // Update with server response if available
+          if (response?.data) {
+            upsertCellInTableDetail(selectedTable, response.data);
+          }
+        } catch (apiErr) {
+          // Rollback on API error
+          if (previousState) {
+            rollbackTableDetail(selectedTable, previousState);
+          }
+          throw apiErr;
+        }
       }
 
-      invalidateTableDetail(selectedTable);
-      invalidateAllTableCache();
       setUseSubTableMode(false);
       setSelectedSubTableId(null);
       setSelectedFile(null);
       setLocalPreviewUrl("");
       setCellValue("");
       onClose();
-      onRefresh();
     } catch (err: any) {
       setError(err.message || "Failed to update cell");
     } finally {
