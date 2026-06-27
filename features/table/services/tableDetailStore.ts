@@ -10,7 +10,8 @@ const listeners: Record<string, Set<(data: TableDetailCache) => void>> = {};
 function notify(tableId: string): void {
   const data = cache[tableId];
   if (!data) return;
-  listeners[tableId]?.forEach((listener) => listener(data));
+  const snapshot = cloneCache(data);
+  listeners[tableId]?.forEach((listener) => listener(snapshot));
 }
 
 /**
@@ -199,6 +200,17 @@ export function rollbackTableDetail(
   if (!previousState) return;
   cache[tableId] = cloneCache(previousState);
   notify(tableId);
+}
+
+export function hasRowInTableDetail(tableId: string, rowId: string): boolean {
+  return !!cache[tableId]?.rows.some((row) => row.id === rowId);
+}
+
+export function hasColumnInTableDetail(
+  tableId: string,
+  columnId: string,
+): boolean {
+  return !!cache[tableId]?.columns.some((column) => column.id === columnId);
 }
 
 /**
