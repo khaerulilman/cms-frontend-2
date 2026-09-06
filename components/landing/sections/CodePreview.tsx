@@ -15,7 +15,7 @@ export default function CodePreview() {
             <pre className="text-slate-300">
               <code>
                 {`// Fetch your portfolio data with a simple API call
-const response = await fetch(\`${process.env.NEXT_PUBLIC_MAIN_API}/api/v1/projects\`, {
+const response = await fetch(\`${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects\`, {
   headers: {
     'Authorization': 'Bearer YOUR_API_KEY',
     'Content-Type': 'application/json'
