@@ -1,17 +1,6 @@
-// API calls use relative path to go through Next.js proxy (rewrites in next.config.ts)
-// This ensures cookies are same-origin and work in all environments
-const BASE_URL = "";
-
-// Direct backend URL for full-page redirects (e.g., Google OAuth)
-// These bypass the proxy since the browser navigates directly
-// trigger commit
-export const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL;
-
-if (!process.env.NEXT_PUBLIC_API_URL) {
-  throw new Error(
-    "NEXT_PUBLIC_API_URL is not defined in environment variables",
-  );
-}
+// Backend API base URL for API requests and full-page redirects (e.g., Google OAuth)
+export const BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "DELETE";
@@ -195,7 +184,7 @@ class ApiClient {
     formData.append("columnId", columnId);
     formData.append("image", image);
 
-    const res = await fetch(`/api/v1/cms-cells/row/${rowId}`, {
+    const res = await fetch(`${this.baseUrl}/api/v1/cms-cells/row/${rowId}`, {
       method: "POST",
       credentials: "include", // Include cookies
       body: formData,

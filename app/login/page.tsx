@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { BACKEND_URL, api } from "@/lib/api";
+import { BASE_URL, api } from "@/lib/api";
 
 function LoginContent() {
   const searchParams = useSearchParams();
@@ -63,7 +63,7 @@ function LoginContent() {
 
   const handleGoogleLogin = () => {
     // Redirect to backend Google OAuth endpoint
-    window.location.href = `${BACKEND_URL}/api/v1/auth/google`;
+    window.location.href = `${BASE_URL}/api/v1/auth/google`;
   };
 
   if (isLoading) {
